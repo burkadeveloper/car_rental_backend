@@ -211,7 +211,7 @@ exports.googleCallback = async (req, res, next) => {
     setTokenCookies(res, accessToken, refreshToken);
 
     // Redirect to frontend (will check profile completeness)
-    res.redirect(process.env.FRONTEND_URL || "http://localhost:3000");
+    res.redirect(`${process.env.FRONTEND_URL}/auth-success`);
   } catch (error) {
     next(error);
   }
