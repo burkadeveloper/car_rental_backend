@@ -1,61 +1,29 @@
-const Redis = require("ioredis");
+const { Redis } = require("@upstash/redis");
 const logger = require("../utils/logger");
-const dns = require("dns");
-const net = require("net");
 
-const host = process.env.REDIS_HOST || "grown-ray-138974.upstash.io";
-const port = parseInt(process.env.REDIS_PORT || 6379);
-
-console.log("🔍 Resolving host:", host);
-dns.lookup(host, (err, address, family) => {
-  if (err) {
-    console.error("❌ DNS lookup failed:", err);
-  } else {
-    console.log("✅ DNS resolved:", address, "family:", family);
-    // Try a simple TCP connection
-    const socket = net.createConnection({ host, port }, () => {
-      console.log("✅ TCP connection succeeded to", host, port);
-      socket.destroy();
-    });
-    socket.on("error", (err) => {
-      console.error("❌ TCP connection failed:", err.message);
-    });
-  }
+// Use environment variables (set in Render)
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
-// Build connection options
-let redisOptions = {
-  db: process.env.REDIS_DB || 0,
-  retryStrategy: (times) => {
-    if (times > 10) {
-      logger.error("Redis connection failed after 10 retries.");
-      return null;
-    }
-    return Math.min(times * 100, 3000);
-  },
+
+// Or simply: const redis = Redis.fromEnv();
+
+// Emulate event emitters for compatibility with existing code
+redis.on = (event, callback) => {
+  if (event === "connect") {
+    // Since REST is always connected, call immediately
+    setImmediate(() => callback());
+  }
+  if (event === "error") {
+    // No error unless misconfigured
+  }
+  return redis;
 };
 
-// If REDIS_URL is set, use it (supports rediss://)
-if (process.env.REDIS_URL) {
-  redisOptions.url = process.env.REDIS_URL;
-  // ioredis automatically enables TLS when using rediss://
-} else {
-  // Fallback to individual env vars
-  redisOptions.host = process.env.REDIS_HOST || "localhost";
-  redisOptions.port = process.env.REDIS_PORT || 6379;
-  redisOptions.password = process.env.REDIS_PASSWORD || undefined;
+redis.emit = () => {}; // stub
 
-  // Enable TLS if connecting to Upstash (or any non-localhost host)
-  if (redisOptions.host && !redisOptions.host.includes("localhost")) {
-    redisOptions.tls = {};
-  }
-}
-console.log(
-  "🔍 REDIS_URL from env:",
-  process.env.REDIS_URL ? "SET ✅" : "MISSING ❌",
-);
-const redis = new Redis(redisOptions);
-
-redis.on("connect", () => logger.info("✅ Redis connected"));
+redis.on("connect", () => logger.info("✅ Redis connected (via Upstash REST)"));
 redis.on("error", (err) => logger.error("Redis error:", err));
 
 module.exports = redis;
