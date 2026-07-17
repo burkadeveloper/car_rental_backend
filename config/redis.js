@@ -1,6 +1,27 @@
 const Redis = require("ioredis");
 const logger = require("../utils/logger");
+const dns = require("dns");
+const net = require("net");
 
+const host = process.env.REDIS_HOST || "grown-ray-138974.upstash.io";
+const port = parseInt(process.env.REDIS_PORT || 6379);
+
+console.log("🔍 Resolving host:", host);
+dns.lookup(host, (err, address, family) => {
+  if (err) {
+    console.error("❌ DNS lookup failed:", err);
+  } else {
+    console.log("✅ DNS resolved:", address, "family:", family);
+    // Try a simple TCP connection
+    const socket = net.createConnection({ host, port }, () => {
+      console.log("✅ TCP connection succeeded to", host, port);
+      socket.destroy();
+    });
+    socket.on("error", (err) => {
+      console.error("❌ TCP connection failed:", err.message);
+    });
+  }
+});
 // Build connection options
 let redisOptions = {
   db: process.env.REDIS_DB || 0,
