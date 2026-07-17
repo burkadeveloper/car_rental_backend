@@ -28,7 +28,10 @@ if (process.env.REDIS_URL) {
     redisOptions.tls = {};
   }
 }
-
+console.log(
+  "🔍 REDIS_URL from env:",
+  process.env.REDIS_URL ? "SET ✅" : "MISSING ❌",
+);
 const redis = new Redis(redisOptions);
 
 redis.on("connect", () => logger.info("✅ Redis connected"));
