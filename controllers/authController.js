@@ -22,16 +22,17 @@ const generateTokens = (user) => {
 };
 
 const setTokenCookies = (res, accessToken, refreshToken) => {
+  const isProduction = process.env.NODE_ENV === "production";
   res.cookie("token", accessToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax", // ✅ FIXED: cross-site cookies
     maxAge: 15 * 60 * 1000,
   });
   res.cookie("refreshToken", refreshToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax", // ✅ FIXED: cross-site cookies
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 };
@@ -86,6 +87,7 @@ exports.register = async (req, res, next) => {
     next(error);
   }
 };
+
 // ─── EMAIL VERIFICATION CALLBACK ───
 exports.verifyEmail = async (req, res, next) => {
   try {
@@ -114,7 +116,6 @@ exports.login = async (req, res, next) => {
     const { email, password } = req.body;
     console.log("🔐 Login attempt for email:", email);
 
-    // Find user (case-insensitive)
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       console.log("❌ User not found:", email);
@@ -127,7 +128,6 @@ exports.login = async (req, res, next) => {
       user.password ? user.password.substring(0, 20) : "none",
     );
 
-    // Check password
     const isMatch = await user.matchPassword(password);
     console.log("🔑 Password match:", isMatch);
 
@@ -145,7 +145,6 @@ exports.login = async (req, res, next) => {
       return res.status(403).json({ message: "Account is disabled" });
     }
 
-    // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user);
     user.refreshToken = refreshToken;
     await user.save();
@@ -175,6 +174,7 @@ exports.login = async (req, res, next) => {
     next(error);
   }
 };
+
 // ─── GOOGLE OAUTH CALLBACK ───
 exports.googleCallback = async (req, res, next) => {
   try {
@@ -210,7 +210,6 @@ exports.googleCallback = async (req, res, next) => {
 
     setTokenCookies(res, accessToken, refreshToken);
 
-    // Redirect to frontend (will check profile completeness)
     res.redirect(`${process.env.FRONTEND_URL}/auth-success`);
   } catch (error) {
     next(error);
@@ -430,6 +429,7 @@ exports.resetPassword = async (req, res, next) => {
     next(error);
   }
 };
+
 // ─── UPLOAD LICENSE IMAGE ───
 exports.uploadLicenseImage = async (req, res, next) => {
   try {
@@ -465,96 +465,11 @@ exports.uploadIdImage = async (req, res, next) => {
     next(error);
   }
 };
-exports.updateProfile = async (req, res, next) => {
-  try {
-    const allowedFields = [
-      "name",
-      "phone",
-      "driverLicense",
-      "idNumber",
-      "address",
-      "profilePicture",
-    ];
-    const updates = {};
-    allowedFields.forEach((field) => {
-      if (req.body[field] !== undefined) updates[field] = req.body[field];
-    });
-    const user = await User.findByIdAndUpdate(req.user.id, updates, {
-      new: true,
-      runValidators: true,
-    }).select("-password -refreshToken");
-    res.json(user);
-  } catch (error) {
-    next(error);
-  }
-};
-exports.isProfileComplete = (user) => {
-  const required = [
-    "phone",
-    "driverLicense",
-    "driverLicenseImage",
-    "idNumber",
-    "idImage",
-    "address",
-  ];
-  for (const field of required) {
-    if (!user[field]) return false;
-  }
-  return true;
-};
-exports.sendPhoneOTP = async (req, res, next) => {
-  try {
-    const { phone } = req.body;
-    const user = req.user;
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    user.phoneVerificationCode = code;
-    user.phoneVerificationExpires = Date.now() + 10 * 60 * 1000;
-    user.phone = phone;
-    await user.save();
-
-    // Try to send SMS; if it fails, we still return success
-    try {
-      await sendSMS(phone, `Your verification code is: ${code}`);
-    } catch (smsErr) {
-      logger.warn(`SMS send failed, but code generated: ${code}`);
-      // For development, return the code in response (remove in production)
-      return res.status(200).json({
-        message: "OTP sent (but SMS failed). Check server logs for code.",
-        code, // ⚠️ remove this in production
-      });
-    }
-
-    res.json({ message: "OTP sent to your phone" });
-  } catch (error) {
-    next(error);
-  }
-};
-exports.verifyPhone = async (req, res, next) => {
-  try {
-    const { code } = req.body;
-    const user = req.user;
-    if (
-      user.phoneVerificationCode !== code ||
-      user.phoneVerificationExpires < Date.now()
-    ) {
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-    }
-    user.isPhoneVerified = true;
-    user.phoneVerificationCode = undefined;
-    user.phoneVerificationExpires = undefined;
-    await user.save();
-
-    res.json({ message: "Phone verified successfully" });
-  } catch (error) {
-    next(error);
-  }
-};
 
 // ─── SUBMIT FOR VERIFICATION ───
 exports.submitVerification = async (req, res, next) => {
   try {
     const user = req.user;
-    // Ensure all required fields are filled
     const required = [
       "phone",
       "driverLicense",
@@ -576,7 +491,6 @@ exports.submitVerification = async (req, res, next) => {
         .json({ message: "Please verify your phone number first." });
     }
 
-    // Check if already pending/approved
     if (user.verificationStatus === "pending") {
       return res
         .status(400)
@@ -589,75 +503,6 @@ exports.submitVerification = async (req, res, next) => {
     user.verificationStatus = "pending";
     user.verificationMessage = "";
     await user.save();
-
-    // Notify admin(s) – could emit socket event or create notification
-    // For simplicity, we'll rely on admin dashboard polling.
-
-    res.json({
-      message:
-        "Verification request submitted. Please wait for admin approval.",
-      status: "pending",
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// ─── GET VERIFICATION STATUS ───
-exports.getVerificationStatus = async (req, res, next) => {
-  try {
-    const user = await User.findById(req.user.id).select(
-      "verificationStatus verificationMessage",
-    );
-    res.json(user);
-  } catch (error) {
-    next(error);
-  }
-};
-// ... (other code)
-
-// ─── SUBMIT FOR VERIFICATION ───
-exports.submitVerification = async (req, res, next) => {
-  try {
-    const user = req.user;
-    // Ensure all required fields are filled
-    const required = [
-      "phone",
-      "driverLicense",
-      "driverLicenseImage",
-      "idNumber",
-      "idImage",
-      "address",
-    ];
-    const missing = required.filter((f) => !user[f] || user[f].trim() === "");
-    if (missing.length > 0) {
-      return res.status(400).json({
-        message: "Please complete all required fields before submitting.",
-        missing,
-      });
-    }
-    if (!user.isPhoneVerified) {
-      return res
-        .status(400)
-        .json({ message: "Please verify your phone number first." });
-    }
-
-    // Check if already pending/approved
-    if (user.verificationStatus === "pending") {
-      return res
-        .status(400)
-        .json({ message: "Your verification is already pending." });
-    }
-    if (user.verificationStatus === "approved") {
-      return res.status(400).json({ message: "You are already verified." });
-    }
-
-    user.verificationStatus = "pending";
-    user.verificationMessage = "";
-    await user.save();
-
-    // Notify admin(s) – could emit socket event or create notification
-    // For simplicity, we'll rely on admin dashboard polling.
 
     res.json({
       message:
