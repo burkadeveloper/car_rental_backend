@@ -111,12 +111,18 @@ exports.verifyEmail = async (req, res, next) => {
 };
 
 // ─── LOGIN ───
+// ─── LOGIN ───
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
     console.log("🔐 Login attempt for email:", email);
 
+<<<<<<< HEAD
     const user = await User.findOne({ email: email.toLowerCase() });
+=======
+    // ✅ Select password explicitly
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+>>>>>>> 093f394d2a4a24879722385b792381e83d760b18
     if (!user) {
       console.log("❌ User not found:", email);
       return res.status(401).json({ message: "Invalid credentials" });
@@ -150,6 +156,9 @@ exports.login = async (req, res, next) => {
     await user.save();
 
     setTokenCookies(res, accessToken, refreshToken);
+
+    // Remove password before sending response
+    user.password = undefined;
 
     res.json({
       user: {
