@@ -111,12 +111,14 @@ exports.verifyEmail = async (req, res, next) => {
 };
 
 // ─── LOGIN ───
+// ─── LOGIN ───
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
     console.log("🔐 Login attempt for email:", email);
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    // ✅ Select password explicitly
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
     if (!user) {
       console.log("❌ User not found:", email);
       return res.status(401).json({ message: "Invalid credentials" });
@@ -151,6 +153,9 @@ exports.login = async (req, res, next) => {
 
     setTokenCookies(res, accessToken, refreshToken);
 
+    // Remove password before sending response
+    user.password = undefined;
+
     res.json({
       user: {
         id: user._id,
@@ -174,7 +179,6 @@ exports.login = async (req, res, next) => {
     next(error);
   }
 };
-
 // ─── GOOGLE OAUTH CALLBACK ───
 exports.googleCallback = async (req, res, next) => {
   try {
